@@ -1,3 +1,6 @@
+use serde_json::{Map, Value};
+use unicode_width::UnicodeWidthStr;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Row {
     Cells(Vec<String>),
@@ -24,6 +27,11 @@ pub struct ListFormatOptions {
 }
 
 pub const DEFAULT_OUTPUT_WIDTH: usize = 80;
+
+/// Computes terminal display width used by layout alignment decisions.
+fn display_width(value: &str) -> usize {
+    UnicodeWidthStr::width(value)
+}
 
 impl Default for ListFormatOptions {
     fn default() -> Self {
@@ -106,7 +114,7 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
     for row in rows {
         if let Row::Cells(cols) = row {
             for (idx, cell) in cols.iter().enumerate() {
-                widths[idx] = widths[idx].max(cell.chars().count());
+                widths[idx] = widths[idx].max(display_width(cell));
             }
         }
     }
@@ -118,7 +126,7 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
                 for (idx, cell) in cols.iter().enumerate() {
                     output.push_str(cell);
                     if idx < cols.len() - 1 {
-                        let pad = widths[idx].saturating_sub(cell.chars().count());
+                        let pad = widths[idx].saturating_sub(display_width(cell));
                         for _ in 0..pad {
                             output.push(' ');
                         }
@@ -143,23 +151,71 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
     output
 }
 
+/// Formats parsed table rows as pretty JSON.
+///
+/// `table_name` is used as the root object key and `column_names` defines emitted JSON keys
+/// for each row object. Returns an error if `column_names` is empty or if any row has more
+/// cells than available column names.
+pub fn format_table_json(
+    rows: &[Row],
+    table_name: &str,
+    column_names: &[String],
+) -> Result<String, String> {
+    if column_names.is_empty() {
+        return Err("option --table-columns or --table-column required for --json".to_string());
+    }
+
+    let mut table_rows = Vec::with_capacity(rows.len());
+    for (row_idx, row) in rows.iter().enumerate() {
+        let mut obj = Map::new();
+        match row {
+            Row::Cells(cols) => {
+                if cols.len() > column_names.len() {
+                    return Err(format!(
+                        "line {}: for JSON the name of the column {} is required",
+                        row_idx + 1,
+                        cols.len()
+                    ));
+                }
+                for (idx, name) in column_names.iter().enumerate() {
+                    let value = cols
+                        .get(idx)
+                        .map_or(Value::Null, |cell| Value::String(cell.clone()));
+                    obj.insert(name.clone(), value);
+                }
+            }
+            Row::Empty => {
+                for name in column_names {
+                    obj.insert(name.clone(), Value::Null);
+                }
+            }
+        }
+        table_rows.push(Value::Object(obj));
+    }
+
+    let mut root = Map::new();
+    root.insert(table_name.to_string(), Value::Array(table_rows));
+    serde_json::to_string_pretty(&Value::Object(root))
+        .map_err(|e| format!("failed to format json: {e}"))
+}
+
 /// Cached metrics for a list layout candidate under a fixed column count.
 struct ListLayoutMetrics {
     rows: usize,
     widths: Vec<usize>,
-    char_counts: Vec<usize>,
+    entry_display_widths: Vec<usize>,
 }
 
 /// Computes row count and per-column widths for a list layout candidate.
 fn list_layout_widths(entries: &[String], cols: usize, fill_rows: bool) -> ListLayoutMetrics {
     let rows = entries.len().div_ceil(cols);
     let mut widths = vec![0usize; cols];
-    let mut char_counts = Vec::with_capacity(entries.len());
+    let mut entry_display_widths = Vec::with_capacity(entries.len());
     for entry in entries {
-        char_counts.push(entry.chars().count());
+        entry_display_widths.push(display_width(entry));
     }
 
-    for (idx, width) in char_counts.iter().enumerate() {
+    for (idx, width) in entry_display_widths.iter().enumerate() {
         let col = if fill_rows { idx % cols } else { idx / rows };
         widths[col] = widths[col].max(*width);
     }
@@ -167,7 +223,7 @@ fn list_layout_widths(entries: &[String], cols: usize, fill_rows: bool) -> ListL
     ListLayoutMetrics {
         rows,
         widths,
-        char_counts,
+        entry_display_widths,
     }
 }
 
@@ -178,11 +234,9 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
 
     let mut best_cols = 1usize;
     let mut best_rows = entries.len();
-    let mut best_widths = vec![entries[0].chars().count()];
-    let mut best_char_counts = entries
-        .iter()
-        .map(|v| v.chars().count())
-        .collect::<Vec<_>>();
+    let mut best_widths = vec![display_width(&entries[0])];
+    let mut best_entry_display_widths =
+        entries.iter().map(|v| display_width(v)).collect::<Vec<_>>();
 
     for cols in 1..=entries.len() {
         let metrics = list_layout_widths(entries, cols, options.fill_rows);
@@ -191,7 +245,7 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
             best_cols = cols;
             best_rows = metrics.rows;
             best_widths = metrics.widths;
-            best_char_counts = metrics.char_counts;
+            best_entry_display_widths = metrics.entry_display_widths;
         } else {
             break;
         }
@@ -216,7 +270,7 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
                 } else {
                     prev_col * best_rows + row
                 };
-                let prev_len = best_char_counts[prev_idx];
+                let prev_len = best_entry_display_widths[prev_idx];
                 let pad = best_widths[prev_col].saturating_sub(prev_len) + 2;
                 for _ in 0..pad {
                     out.push(' ');
@@ -233,9 +287,11 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::Value;
+
     use super::{
-        ListFormatOptions, Row, TableFormatOptions, format_list, format_table, parse_entries,
-        parse_rows,
+        ListFormatOptions, Row, TableFormatOptions, format_list, format_table, format_table_json,
+        parse_entries, parse_rows,
     };
 
     #[test]
@@ -301,6 +357,16 @@ mod tests {
     }
 
     #[test]
+    fn format_table_aligns_display_width() {
+        let rows = vec![
+            Row::Cells(vec!["你".to_string(), "1".to_string()]),
+            Row::Cells(vec!["ab".to_string(), "22".to_string()]),
+        ];
+        let out = format_table(&rows, &TableFormatOptions::default());
+        assert_eq!(out, "你  1\nab  22\n");
+    }
+
+    #[test]
     fn format_table_keeps_empty_lines_shape() {
         let rows = vec![
             Row::Cells(vec!["a".to_string(), "b".to_string()]),
@@ -324,6 +390,38 @@ mod tests {
             },
         );
         assert_eq!(out, "a | b\nc | d\n");
+    }
+
+    #[test]
+    fn format_table_json_emits_named_columns() {
+        let rows = vec![
+            Row::Cells(vec!["a".to_string(), "b".to_string()]),
+            Row::Cells(vec!["c".to_string()]),
+        ];
+        let out = format_table_json(&rows, "table", &["c1".to_string(), "c2".to_string()])
+            .expect("json formatting should succeed");
+        let value: Value = serde_json::from_str(&out).expect("valid json");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "table": [
+                    { "c1": "a", "c2": "b" },
+                    { "c1": "c", "c2": null }
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn format_table_json_rejects_too_many_cells() {
+        let rows = vec![Row::Cells(vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+        ])];
+        let err = format_table_json(&rows, "table", &["c1".to_string(), "c2".to_string()])
+            .expect_err("should reject unnamed column");
+        assert!(err.contains("name of the column 3 is required"));
     }
 
     #[test]
@@ -364,5 +462,23 @@ mod tests {
             },
         );
         assert_eq!(out, "1  2\n3  4\n5  6\n");
+    }
+
+    #[test]
+    fn format_list_uses_display_width_for_padding() {
+        let entries = vec![
+            "你".to_string(),
+            "ab".to_string(),
+            "cd".to_string(),
+            "ef".to_string(),
+        ];
+        let out = format_list(
+            &entries,
+            &ListFormatOptions {
+                output_width: 6,
+                fill_rows: false,
+            },
+        );
+        assert_eq!(out, "你  cd\nab  ef\n");
     }
 }
