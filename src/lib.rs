@@ -28,6 +28,7 @@ pub struct ListFormatOptions {
 
 pub const DEFAULT_OUTPUT_WIDTH: usize = 80;
 
+/// Computes terminal display width used by layout alignment decisions.
 fn display_width(value: &str) -> usize {
     UnicodeWidthStr::width(value)
 }
