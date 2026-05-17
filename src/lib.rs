@@ -85,13 +85,11 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
             }
             Row::Empty => {
                 if max_cols > 1 {
-                    for (idx, width) in widths.iter().enumerate().take(max_cols - 1) {
+                    for width in widths.iter().take(max_cols - 1) {
                         for _ in 0..*width {
                             output.push(' ');
                         }
-                        if idx < max_cols - 1 {
-                            output.push_str(&options.output_separator);
-                        }
+                        output.push_str(&options.output_separator);
                     }
                 }
             }
