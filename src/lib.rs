@@ -143,12 +143,14 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
     output
 }
 
+/// Cached metrics for a list layout candidate under a fixed column count.
 struct ListLayoutMetrics {
     rows: usize,
     widths: Vec<usize>,
     char_counts: Vec<usize>,
 }
 
+/// Computes row count and per-column widths for a list layout candidate.
 fn list_layout_widths(entries: &[String], cols: usize, fill_rows: bool) -> ListLayoutMetrics {
     let rows = entries.len().div_ceil(cols);
     let mut widths = vec![0usize; cols];

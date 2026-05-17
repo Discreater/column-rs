@@ -8,6 +8,7 @@ use column_rs::{
     parse_entries, parse_rows,
 };
 
+/// Parsed command-line options for selecting mode, formatting, and inputs.
 struct CliOptions {
     paths: Vec<String>,
     table_mode: bool,
