@@ -1,3 +1,4 @@
+use serde_json::{Map, Value};
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -149,6 +150,49 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
     output
 }
 
+pub fn format_table_json(
+    rows: &[Row],
+    table_name: &str,
+    column_names: &[String],
+) -> Result<String, String> {
+    if column_names.is_empty() {
+        return Err("option --table-columns or --table-column required for --json".to_string());
+    }
+
+    let mut table_rows = Vec::with_capacity(rows.len());
+    for (row_idx, row) in rows.iter().enumerate() {
+        let mut obj = Map::new();
+        match row {
+            Row::Cells(cols) => {
+                if cols.len() > column_names.len() {
+                    return Err(format!(
+                        "line {}: for JSON the name of the column {} is required",
+                        row_idx + 1,
+                        cols.len()
+                    ));
+                }
+                for (idx, name) in column_names.iter().enumerate() {
+                    let value = cols
+                        .get(idx)
+                        .map_or(Value::Null, |cell| Value::String(cell.clone()));
+                    obj.insert(name.clone(), value);
+                }
+            }
+            Row::Empty => {
+                for name in column_names {
+                    obj.insert(name.clone(), Value::Null);
+                }
+            }
+        }
+        table_rows.push(Value::Object(obj));
+    }
+
+    let mut root = Map::new();
+    root.insert(table_name.to_string(), Value::Array(table_rows));
+    serde_json::to_string_pretty(&Value::Object(root))
+        .map_err(|e| format!("failed to format json: {e}"))
+}
+
 /// Cached metrics for a list layout candidate under a fixed column count.
 struct ListLayoutMetrics {
     rows: usize,
@@ -237,9 +281,11 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::Value;
+
     use super::{
-        ListFormatOptions, Row, TableFormatOptions, format_list, format_table, parse_entries,
-        parse_rows,
+        ListFormatOptions, Row, TableFormatOptions, format_list, format_table, format_table_json,
+        parse_entries, parse_rows,
     };
 
     #[test]
@@ -338,6 +384,38 @@ mod tests {
             },
         );
         assert_eq!(out, "a | b\nc | d\n");
+    }
+
+    #[test]
+    fn format_table_json_emits_named_columns() {
+        let rows = vec![
+            Row::Cells(vec!["a".to_string(), "b".to_string()]),
+            Row::Cells(vec!["c".to_string()]),
+        ];
+        let out = format_table_json(&rows, "table", &["c1".to_string(), "c2".to_string()])
+            .expect("json formatting should succeed");
+        let value: Value = serde_json::from_str(&out).expect("valid json");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "table": [
+                    { "c1": "a", "c2": "b" },
+                    { "c1": "c", "c2": null }
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn format_table_json_rejects_too_many_cells() {
+        let rows = vec![Row::Cells(vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+        ])];
+        let err = format_table_json(&rows, "table", &["c1".to_string(), "c2".to_string()])
+            .expect_err("should reject unnamed column");
+        assert!(err.contains("name of the column 3 is required"));
     }
 
     #[test]

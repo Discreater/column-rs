@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use column_rs::{
     DEFAULT_OUTPUT_WIDTH, ListFormatOptions, TableFormatOptions, format_list, format_table,
-    parse_entries, parse_rows,
+    format_table_json, parse_entries, parse_rows,
 };
 
 /// Parsed command-line options for selecting mode, formatting, and inputs.
@@ -17,6 +17,9 @@ struct CliOptions {
     output_separator: String,
     output_width: usize,
     fill_rows: bool,
+    json_output: bool,
+    table_name: String,
+    table_columns: Option<Vec<String>>,
 }
 
 const HELP_TEXT: &str = "\
@@ -27,6 +30,9 @@ Columnate lists.
 
 Options:
  -t, --table                      create a table
+ -n, --table-name <name>          table name for JSON output
+ -N, --table-columns <names>      comma separated columns names
+ -J, --json                       use JSON output format for table
  -c, --output-width <width>       width of output in number of characters
  -x, --fillrows                   fill rows before columns
  -L, --keep-empty-lines           don't ignore empty lines
@@ -79,6 +85,9 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
     let mut output_separator = "  ".to_string();
     let mut output_width = DEFAULT_OUTPUT_WIDTH;
     let mut fill_rows = false;
+    let mut json_output = false;
+    let mut table_name = "table".to_string();
+    let mut table_columns: Option<Vec<String>> = None;
     let mut paths = Vec::new();
 
     let mut idx = 0usize;
@@ -103,6 +112,55 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
         }
         if arg == "-x" || arg == "--fillrows" {
             fill_rows = true;
+            idx += 1;
+            continue;
+        }
+        if arg == "-J" || arg == "--json" {
+            json_output = true;
+            idx += 1;
+            continue;
+        }
+        if arg == "-n" || arg == "--table-name" {
+            let Some(next) = args.get(idx + 1) else {
+                return Err("missing argument for -n/--table-name".to_string());
+            };
+            table_name = next.clone();
+            idx += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--table-name=") {
+            table_name = value.to_string();
+            idx += 1;
+            continue;
+        }
+        if arg == "-N" || arg == "--table-columns" {
+            let Some(next) = args.get(idx + 1) else {
+                return Err("missing argument for -N/--table-columns".to_string());
+            };
+            let columns = next
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            if columns.is_empty() {
+                return Err("invalid argument for -N/--table-columns".to_string());
+            }
+            table_columns = Some(columns);
+            idx += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--table-columns=") {
+            let columns = value
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            if columns.is_empty() {
+                return Err("invalid argument for -N/--table-columns".to_string());
+            }
+            table_columns = Some(columns);
             idx += 1;
             continue;
         }
@@ -174,6 +232,9 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
         output_separator,
         output_width,
         fill_rows,
+        json_output,
+        table_name,
+        table_columns,
     })
 }
 
@@ -186,21 +247,29 @@ fn run() -> Result<(), String> {
     };
 
     let input = read_input(&options.paths)?;
-    if options.table_mode {
+    if options.table_mode || options.json_output {
         let rows = parse_rows(
             &input,
             options.separators.as_deref(),
             options.keep_empty_lines,
         );
-        print!(
-            "{}",
-            format_table(
-                &rows,
-                &TableFormatOptions {
-                    output_separator: options.output_separator,
-                }
-            )
-        );
+        if options.json_output {
+            let columns = options.table_columns.as_ref().ok_or_else(|| {
+                "option --table-columns or --table-column required for --json".to_string()
+            })?;
+            let out = format_table_json(&rows, &options.table_name, columns)?;
+            println!("{out}");
+        } else {
+            print!(
+                "{}",
+                format_table(
+                    &rows,
+                    &TableFormatOptions {
+                        output_separator: options.output_separator,
+                    }
+                )
+            );
+        }
     } else {
         let entries = parse_entries(
             &input,

@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde_json::json;
+
 fn run_column(args: &[&str], stdin_data: &str) -> (String, String, i32) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_column-rs"))
         .args(args)
@@ -100,7 +102,47 @@ fn supports_explicit_table_mode() {
 
 #[test]
 fn rejects_unsupported_option() {
-    let (_, stderr, code) = run_column(&["--json"], "");
+    let (_, stderr, code) = run_column(&["--tree", "id"], "");
     assert_eq!(code, 1);
-    assert!(stderr.contains("unsupported option: --json"));
+    assert!(stderr.contains("unsupported option: --tree"));
+}
+
+#[test]
+fn json_output_requires_table_columns() {
+    let (_, stderr, code) = run_column(&["--json"], "a b\n");
+    assert_eq!(code, 1);
+    assert!(stderr.contains("option --table-columns or --table-column required for --json"));
+}
+
+#[test]
+fn supports_json_output_with_named_columns() {
+    let (stdout, stderr, code) = run_column(&["--json", "-N", "c1,c2"], "a b\nc d\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be json");
+    assert_eq!(
+        value,
+        json!({
+            "table": [
+                {"c1": "a", "c2": "b"},
+                {"c1": "c", "c2": "d"}
+            ]
+        })
+    );
+}
+
+#[test]
+fn supports_json_custom_table_name() {
+    let (stdout, stderr, code) = run_column(&["--json", "-N", "k,v", "-n", "mytab"], "a b\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be json");
+    assert_eq!(
+        value,
+        json!({
+            "mytab": [
+                {"k": "a", "v": "b"}
+            ]
+        })
+    );
 }
