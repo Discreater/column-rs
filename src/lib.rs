@@ -153,19 +153,19 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
 struct ListLayoutMetrics {
     rows: usize,
     widths: Vec<usize>,
-    entry_widths: Vec<usize>,
+    entry_display_widths: Vec<usize>,
 }
 
 /// Computes row count and per-column widths for a list layout candidate.
 fn list_layout_widths(entries: &[String], cols: usize, fill_rows: bool) -> ListLayoutMetrics {
     let rows = entries.len().div_ceil(cols);
     let mut widths = vec![0usize; cols];
-    let mut entry_widths = Vec::with_capacity(entries.len());
+    let mut entry_display_widths = Vec::with_capacity(entries.len());
     for entry in entries {
-        entry_widths.push(display_width(entry));
+        entry_display_widths.push(display_width(entry));
     }
 
-    for (idx, width) in entry_widths.iter().enumerate() {
+    for (idx, width) in entry_display_widths.iter().enumerate() {
         let col = if fill_rows { idx % cols } else { idx / rows };
         widths[col] = widths[col].max(*width);
     }
@@ -173,7 +173,7 @@ fn list_layout_widths(entries: &[String], cols: usize, fill_rows: bool) -> ListL
     ListLayoutMetrics {
         rows,
         widths,
-        entry_widths,
+        entry_display_widths,
     }
 }
 
@@ -185,7 +185,8 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
     let mut best_cols = 1usize;
     let mut best_rows = entries.len();
     let mut best_widths = vec![display_width(&entries[0])];
-    let mut best_entry_widths = entries.iter().map(|v| display_width(v)).collect::<Vec<_>>();
+    let mut best_entry_display_widths =
+        entries.iter().map(|v| display_width(v)).collect::<Vec<_>>();
 
     for cols in 1..=entries.len() {
         let metrics = list_layout_widths(entries, cols, options.fill_rows);
@@ -194,7 +195,7 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
             best_cols = cols;
             best_rows = metrics.rows;
             best_widths = metrics.widths;
-            best_entry_widths = metrics.entry_widths;
+            best_entry_display_widths = metrics.entry_display_widths;
         } else {
             break;
         }
@@ -219,7 +220,7 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
                 } else {
                     prev_col * best_rows + row
                 };
-                let prev_len = best_entry_widths[prev_idx];
+                let prev_len = best_entry_display_widths[prev_idx];
                 let pad = best_widths[prev_col].saturating_sub(prev_len) + 2;
                 for _ in 0..pad {
                     out.push(' ');
