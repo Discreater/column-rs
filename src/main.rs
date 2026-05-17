@@ -86,13 +86,14 @@ fn read_input(paths: &[String]) -> Result<String, String> {
 }
 
 fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
+    let raw_args = args.clone();
     let mut argv = Vec::with_capacity(args.len() + 1);
     argv.push("column-rs".to_string());
     argv.extend(args);
 
     let matches = build_cli_command()
         .try_get_matches_from(argv)
-        .map_err(map_clap_error)?;
+        .map_err(|err| map_clap_error(err, &raw_args))?;
 
     if matches.get_flag("help") {
         println!("{HELP_TEXT}");
@@ -251,15 +252,80 @@ fn parse_non_empty_csv(value: &str, arg_name: &str) -> Result<Vec<String>, Strin
     Ok(items)
 }
 
-fn map_clap_error(err: clap::Error) -> String {
-    if err.kind() == ErrorKind::UnknownArgument {
-        let rendered = err.to_string();
-        if let Some(arg) = rendered.split('\'').nth(1) {
-            return format!("unsupported option: {arg}");
-        }
+fn map_clap_error(err: clap::Error, args: &[String]) -> String {
+    if err.kind() == ErrorKind::UnknownArgument
+        && let Some(arg) = find_unknown_option(args)
+    {
+        return format!("unsupported option: {arg}");
     }
 
     err.to_string().trim().to_string()
+}
+
+fn find_unknown_option(args: &[String]) -> Option<String> {
+    let known_flags = [
+        "-t",
+        "--table",
+        "-x",
+        "--fillrows",
+        "-J",
+        "--json",
+        "-d",
+        "--table-noheadings",
+        "-L",
+        "--keep-empty-lines",
+        "-h",
+        "--help",
+        "-V",
+        "--version",
+    ];
+    let value_options = [
+        "-n",
+        "--table-name",
+        "-N",
+        "--table-columns",
+        "-H",
+        "--table-hide",
+        "-c",
+        "--output-width",
+        "-s",
+        "--separator",
+        "-o",
+        "--output-separator",
+    ];
+
+    let mut idx = 0usize;
+    while idx < args.len() {
+        let arg = &args[idx];
+        if arg == "--" {
+            break;
+        }
+        if arg == "-" || !arg.starts_with('-') {
+            idx += 1;
+            continue;
+        }
+
+        if let Some((name, _)) = arg.split_once('=')
+            && value_options.contains(&name)
+        {
+            idx += 1;
+            continue;
+        }
+
+        if known_flags.contains(&arg.as_str()) {
+            idx += 1;
+            continue;
+        }
+
+        if value_options.contains(&arg.as_str()) {
+            idx += 2;
+            continue;
+        }
+
+        return Some(arg.clone());
+    }
+
+    None
 }
 
 /// Resolves `-H/--table-hide` specs into 0-based column indexes.
