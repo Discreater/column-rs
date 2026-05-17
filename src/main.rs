@@ -2,6 +2,7 @@ use std::env;
 use std::fs::File;
 use std::io::{self, Read};
 use std::process::ExitCode;
+use std::{cmp, collections::HashSet};
 
 use column_rs::{
     DEFAULT_OUTPUT_WIDTH, ListFormatOptions, Row, TableFormatOptions, format_list, format_table,
@@ -22,6 +23,7 @@ struct CliOptions {
     table_name_set: bool,
     table_columns: Option<Vec<String>>,
     table_noheadings: bool,
+    table_hide: Vec<String>,
 }
 
 const HELP_TEXT: &str = "\
@@ -34,6 +36,7 @@ Options:
  -t, --table                      create a table
  -n, --table-name <name>          table name for JSON output
  -N, --table-columns <names>      comma separated columns names
+ -H, --table-hide <columns>       don't print the columns
  -d, --table-noheadings           don't print header
  -J, --json                       use JSON output format for table
  -c, --output-width <width>       width of output in number of characters
@@ -93,6 +96,7 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
     let mut table_name_set = false;
     let mut table_columns: Option<Vec<String>> = None;
     let mut table_noheadings = false;
+    let mut table_hide: Vec<String> = Vec::new();
     let mut paths = Vec::new();
 
     let mut idx = 0usize;
@@ -176,6 +180,30 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
             idx += 1;
             continue;
         }
+        if arg == "-H" || arg == "--table-hide" {
+            let Some(next) = args.get(idx + 1) else {
+                return Err("missing argument for -H/--table-hide".to_string());
+            };
+            table_hide.extend(
+                next.split(',')
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(ToString::to_string),
+            );
+            idx += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--table-hide=") {
+            table_hide.extend(
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(ToString::to_string),
+            );
+            idx += 1;
+            continue;
+        }
         if arg == "-c" || arg == "--output-width" {
             let Some(next) = args.get(idx + 1) else {
                 return Err("missing argument for -c/--output-width".to_string());
@@ -249,7 +277,45 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
         table_name_set,
         table_columns,
         table_noheadings,
+        table_hide,
     })
+}
+
+fn resolve_hidden_columns(
+    max_cols: usize,
+    table_columns: Option<&[String]>,
+    hidden_specs: &[String],
+) -> Result<HashSet<usize>, String> {
+    let mut hidden = HashSet::new();
+    for spec in hidden_specs {
+        if let Ok(col_num) = spec.parse::<usize>() {
+            if col_num == 0 || (max_cols > 0 && col_num > max_cols) {
+                return Err(format!("undefined column name '{spec}'"));
+            }
+            hidden.insert(col_num - 1);
+            continue;
+        }
+        let Some(columns) = table_columns else {
+            return Err(format!("undefined column name '{spec}'"));
+        };
+        let Some(idx) = columns.iter().position(|name| name == spec) else {
+            return Err(format!("undefined column name '{spec}'"));
+        };
+        hidden.insert(idx);
+    }
+    Ok(hidden)
+}
+
+fn hide_row_columns(row: &mut Row, hidden: &HashSet<usize>) {
+    if let Row::Cells(cells) = row {
+        let mut kept = Vec::with_capacity(cells.len());
+        for (idx, cell) in cells.iter().enumerate() {
+            if !hidden.contains(&idx) {
+                kept.push(cell.clone());
+            }
+        }
+        *cells = kept;
+    }
 }
 
 fn run() -> Result<(), String> {
@@ -261,7 +327,10 @@ fn run() -> Result<(), String> {
     };
     if !options.table_mode
         && !options.json_output
-        && (options.table_columns.is_some() || options.table_name_set || options.table_noheadings)
+        && (options.table_columns.is_some()
+            || options.table_name_set
+            || options.table_noheadings
+            || !options.table_hide.is_empty())
     {
         return Err("option --table required for all --table-*".to_string());
     }
@@ -273,17 +342,49 @@ fn run() -> Result<(), String> {
             options.separators.as_deref(),
             options.keep_empty_lines,
         );
+        let max_cols = cmp::max(
+            rows.iter()
+                .map(|row| match row {
+                    Row::Cells(cols) => cols.len(),
+                    Row::Empty => 0,
+                })
+                .max()
+                .unwrap_or(0),
+            options.table_columns.as_ref().map_or(0, |cols| cols.len()),
+        );
+        let hidden_columns = resolve_hidden_columns(
+            max_cols,
+            options.table_columns.as_deref(),
+            &options.table_hide,
+        )?;
+        if !hidden_columns.is_empty() {
+            for row in &mut rows {
+                hide_row_columns(row, &hidden_columns);
+            }
+        }
         if options.json_output {
             let columns = options.table_columns.as_ref().ok_or_else(|| {
                 "option --table-columns or --table-column required for --json".to_string()
             })?;
-            let out = format_table_json(&rows, &options.table_name, columns)?;
+            let filtered_columns = columns
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, name)| (!hidden_columns.contains(&idx)).then_some(name.clone()))
+                .collect::<Vec<_>>();
+            let out = format_table_json(&rows, &options.table_name, &filtered_columns)?;
             println!("{out}");
         } else {
             if let Some(columns) = options.table_columns.as_ref()
                 && !options.table_noheadings
             {
-                rows.insert(0, Row::Cells(columns.clone()));
+                let header = columns
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, name)| {
+                        (!hidden_columns.contains(&idx)).then_some(name.clone())
+                    })
+                    .collect::<Vec<_>>();
+                rows.insert(0, Row::Cells(header));
             }
             print!(
                 "{}",

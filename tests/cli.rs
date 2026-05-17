@@ -117,6 +117,48 @@ fn supports_table_noheadings_with_named_columns() {
 }
 
 #[test]
+fn supports_table_hide_by_index() {
+    let (stdout, stderr, code) = run_column(&["-t", "-H", "2"], "a b c\n1 2 3\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "a  c\n1  3\n");
+}
+
+#[test]
+fn supports_table_hide_by_name() {
+    let (stdout, stderr, code) =
+        run_column(&["-t", "-N", "c1,c2,c3", "-H", "c2"], "a b c\n1 2 3\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "c1  c3\na   c\n1   3\n");
+}
+
+#[test]
+fn supports_json_table_hide_by_name() {
+    let (stdout, stderr, code) =
+        run_column(&["--json", "-N", "c1,c2,c3", "-H", "c2"], "a b c\n1 2 3\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be json");
+    assert_eq!(
+        value,
+        json!({
+            "table": [
+                {"c1": "a", "c3": "c"},
+                {"c1": "1", "c3": "3"}
+            ]
+        })
+    );
+}
+
+#[test]
+fn rejects_undefined_hidden_column() {
+    let (_, stderr, code) = run_column(&["-t", "-H", "c2"], "a b c\n");
+    assert_eq!(code, 1);
+    assert!(stderr.contains("undefined column name 'c2'"));
+}
+
+#[test]
 fn rejects_table_options_without_table_or_json_mode() {
     let (_, stderr, code) = run_column(&["-N", "c1,c2"], "");
     assert_eq!(code, 1);
