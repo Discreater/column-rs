@@ -119,6 +119,11 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
             idx += 1;
             continue;
         }
+        if arg == "-" {
+            paths.push(arg.clone());
+            idx += 1;
+            continue;
+        }
         if arg.starts_with('-') {
             return Err(format!("unsupported option: {arg}"));
         }
