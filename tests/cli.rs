@@ -101,6 +101,29 @@ fn supports_explicit_table_mode() {
 }
 
 #[test]
+fn supports_table_columns_header_in_table_mode() {
+    let (stdout, stderr, code) = run_column(&["-t", "-N", "c1,c2"], "a b\nc d\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "c1  c2\na   b\nc   d\n");
+}
+
+#[test]
+fn supports_table_noheadings_with_named_columns() {
+    let (stdout, stderr, code) = run_column(&["-t", "-N", "c1,c2", "-d"], "a b\nc d\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "a  b\nc  d\n");
+}
+
+#[test]
+fn rejects_table_options_without_table_or_json_mode() {
+    let (_, stderr, code) = run_column(&["-N", "c1,c2"], "");
+    assert_eq!(code, 1);
+    assert!(stderr.contains("option --table required for all --table-*"));
+}
+
+#[test]
 fn rejects_unsupported_option() {
     let (_, stderr, code) = run_column(&["--tree", "id"], "");
     assert_eq!(code, 1);

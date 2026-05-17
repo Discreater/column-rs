@@ -4,7 +4,7 @@ use std::io::{self, Read};
 use std::process::ExitCode;
 
 use column_rs::{
-    DEFAULT_OUTPUT_WIDTH, ListFormatOptions, TableFormatOptions, format_list, format_table,
+    DEFAULT_OUTPUT_WIDTH, ListFormatOptions, Row, TableFormatOptions, format_list, format_table,
     format_table_json, parse_entries, parse_rows,
 };
 
@@ -19,7 +19,9 @@ struct CliOptions {
     fill_rows: bool,
     json_output: bool,
     table_name: String,
+    table_name_set: bool,
     table_columns: Option<Vec<String>>,
+    table_noheadings: bool,
 }
 
 const HELP_TEXT: &str = "\
@@ -32,6 +34,7 @@ Options:
  -t, --table                      create a table
  -n, --table-name <name>          table name for JSON output
  -N, --table-columns <names>      comma separated columns names
+ -d, --table-noheadings           don't print header
  -J, --json                       use JSON output format for table
  -c, --output-width <width>       width of output in number of characters
  -x, --fillrows                   fill rows before columns
@@ -87,7 +90,9 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
     let mut fill_rows = false;
     let mut json_output = false;
     let mut table_name = "table".to_string();
+    let mut table_name_set = false;
     let mut table_columns: Option<Vec<String>> = None;
+    let mut table_noheadings = false;
     let mut paths = Vec::new();
 
     let mut idx = 0usize;
@@ -125,11 +130,13 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
                 return Err("missing argument for -n/--table-name".to_string());
             };
             table_name = next.clone();
+            table_name_set = true;
             idx += 2;
             continue;
         }
         if let Some(value) = arg.strip_prefix("--table-name=") {
             table_name = value.to_string();
+            table_name_set = true;
             idx += 1;
             continue;
         }
@@ -161,6 +168,11 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
                 return Err("invalid argument for -N/--table-columns".to_string());
             }
             table_columns = Some(columns);
+            idx += 1;
+            continue;
+        }
+        if arg == "-d" || arg == "--table-noheadings" {
+            table_noheadings = true;
             idx += 1;
             continue;
         }
@@ -234,7 +246,9 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
         fill_rows,
         json_output,
         table_name,
+        table_name_set,
         table_columns,
+        table_noheadings,
     })
 }
 
@@ -245,10 +259,16 @@ fn run() -> Result<(), String> {
         Err(msg) if msg.is_empty() => return Ok(()),
         Err(msg) => return Err(msg),
     };
+    if !options.table_mode
+        && !options.json_output
+        && (options.table_columns.is_some() || options.table_name_set || options.table_noheadings)
+    {
+        return Err("option --table required for all --table-*".to_string());
+    }
 
     let input = read_input(&options.paths)?;
     if options.table_mode || options.json_output {
-        let rows = parse_rows(
+        let mut rows = parse_rows(
             &input,
             options.separators.as_deref(),
             options.keep_empty_lines,
@@ -260,6 +280,11 @@ fn run() -> Result<(), String> {
             let out = format_table_json(&rows, &options.table_name, columns)?;
             println!("{out}");
         } else {
+            if let Some(columns) = options.table_columns.as_ref()
+                && !options.table_noheadings
+            {
+                rows.insert(0, Row::Cells(columns.clone()));
+            }
             print!(
                 "{}",
                 format_table(
