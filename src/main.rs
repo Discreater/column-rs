@@ -4,6 +4,7 @@ use std::io::{self, Read};
 use std::process::ExitCode;
 use std::{cmp, collections::HashSet};
 
+use clap::{Arg, ArgAction, Command, error::ErrorKind};
 use column_rs::{
     DEFAULT_OUTPUT_WIDTH, ListFormatOptions, Row, TableFormatOptions, format_list, format_table,
     format_table_json, parse_entries, parse_rows,
@@ -85,200 +86,180 @@ fn read_input(paths: &[String]) -> Result<String, String> {
 }
 
 fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
-    let mut table_mode = false;
-    let mut keep_empty_lines = false;
-    let mut separators = None;
-    let mut output_separator = "  ".to_string();
-    let mut output_width = DEFAULT_OUTPUT_WIDTH;
-    let mut fill_rows = false;
-    let mut json_output = false;
-    let mut table_name = "table".to_string();
-    let mut table_name_set = false;
-    let mut table_columns: Option<Vec<String>> = None;
-    let mut table_noheadings = false;
-    let mut table_hide: Vec<String> = Vec::new();
-    let mut paths = Vec::new();
+    let mut argv = Vec::with_capacity(args.len() + 1);
+    argv.push("column-rs".to_string());
+    argv.extend(args);
 
-    let mut idx = 0usize;
-    while idx < args.len() {
-        let arg = &args[idx];
-        if arg == "--" {
-            paths.extend(args[idx + 1..].iter().cloned());
-            break;
-        }
-        if arg == "-h" || arg == "--help" {
-            println!("{HELP_TEXT}");
-            return Err(String::new());
-        }
-        if arg == "-V" || arg == "--version" {
-            println!("column-rs {}", env!("CARGO_PKG_VERSION"));
-            return Err(String::new());
-        }
-        if arg == "-t" || arg == "--table" {
-            table_mode = true;
-            idx += 1;
-            continue;
-        }
-        if arg == "-x" || arg == "--fillrows" {
-            fill_rows = true;
-            idx += 1;
-            continue;
-        }
-        if arg == "-J" || arg == "--json" {
-            json_output = true;
-            idx += 1;
-            continue;
-        }
-        if arg == "-n" || arg == "--table-name" {
-            let Some(next) = args.get(idx + 1) else {
-                return Err("missing argument for -n/--table-name".to_string());
-            };
-            table_name = next.clone();
-            table_name_set = true;
-            idx += 2;
-            continue;
-        }
-        if let Some(value) = arg.strip_prefix("--table-name=") {
-            table_name = value.to_string();
-            table_name_set = true;
-            idx += 1;
-            continue;
-        }
-        if arg == "-N" || arg == "--table-columns" {
-            let Some(next) = args.get(idx + 1) else {
-                return Err("missing argument for -N/--table-columns".to_string());
-            };
-            let columns = next
-                .split(',')
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .map(ToString::to_string)
-                .collect::<Vec<_>>();
-            if columns.is_empty() {
-                return Err("invalid argument for -N/--table-columns".to_string());
-            }
-            table_columns = Some(columns);
-            idx += 2;
-            continue;
-        }
-        if let Some(value) = arg.strip_prefix("--table-columns=") {
-            let columns = value
-                .split(',')
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .map(ToString::to_string)
-                .collect::<Vec<_>>();
-            if columns.is_empty() {
-                return Err("invalid argument for -N/--table-columns".to_string());
-            }
-            table_columns = Some(columns);
-            idx += 1;
-            continue;
-        }
-        if arg == "-d" || arg == "--table-noheadings" {
-            table_noheadings = true;
-            idx += 1;
-            continue;
-        }
-        if arg == "-H" || arg == "--table-hide" {
-            let Some(next) = args.get(idx + 1) else {
-                return Err("missing argument for -H/--table-hide".to_string());
-            };
-            table_hide.extend(
-                next.split(',')
-                    .map(str::trim)
-                    .filter(|name| !name.is_empty())
-                    .map(ToString::to_string),
-            );
-            idx += 2;
-            continue;
-        }
-        if let Some(value) = arg.strip_prefix("--table-hide=") {
-            table_hide.extend(
-                value
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|name| !name.is_empty())
-                    .map(ToString::to_string),
-            );
-            idx += 1;
-            continue;
-        }
-        if arg == "-c" || arg == "--output-width" {
-            let Some(next) = args.get(idx + 1) else {
-                return Err("missing argument for -c/--output-width".to_string());
-            };
-            output_width = next
-                .parse::<usize>()
-                .map_err(|_| format!("invalid output width: {next}"))?;
-            idx += 2;
-            continue;
-        }
-        if let Some(value) = arg.strip_prefix("--output-width=") {
-            output_width = value
-                .parse::<usize>()
-                .map_err(|_| format!("invalid output width: {value}"))?;
-            idx += 1;
-            continue;
-        }
-        if arg == "-L" || arg == "--keep-empty-lines" {
-            keep_empty_lines = true;
-            idx += 1;
-            continue;
-        }
-        if arg == "-s" || arg == "--separator" {
-            let Some(next) = args.get(idx + 1) else {
-                return Err("missing argument for -s/--separator".to_string());
-            };
-            separators = Some(next.clone());
-            idx += 2;
-            continue;
-        }
-        if let Some(value) = arg.strip_prefix("--separator=") {
-            separators = Some(value.to_string());
-            idx += 1;
-            continue;
-        }
-        if arg == "-o" || arg == "--output-separator" {
-            let Some(next) = args.get(idx + 1) else {
-                return Err("missing argument for -o/--output-separator".to_string());
-            };
-            output_separator = next.clone();
-            idx += 2;
-            continue;
-        }
-        if let Some(value) = arg.strip_prefix("--output-separator=") {
-            output_separator = value.to_string();
-            idx += 1;
-            continue;
-        }
-        if arg == "-" {
-            paths.push(arg.clone());
-            idx += 1;
-            continue;
-        }
-        if arg.starts_with('-') {
-            return Err(format!("unsupported option: {arg}"));
-        }
-        paths.push(arg.clone());
-        idx += 1;
+    let matches = build_cli_command()
+        .try_get_matches_from(argv)
+        .map_err(map_clap_error)?;
+
+    if matches.get_flag("help") {
+        println!("{HELP_TEXT}");
+        return Err(String::new());
+    }
+    if matches.get_flag("version") {
+        println!("column-rs {}", env!("CARGO_PKG_VERSION"));
+        return Err(String::new());
     }
 
+    let table_columns = matches
+        .get_one::<String>("table-columns")
+        .map(|value| parse_non_empty_csv(value, "-N/--table-columns"))
+        .transpose()?;
+    let table_hide = matches
+        .get_many::<String>("table-hide")
+        .map(|values| {
+            values
+                .flat_map(|value| {
+                    value
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .map(ToString::to_string)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
     Ok(CliOptions {
-        paths,
-        table_mode,
-        keep_empty_lines,
-        separators,
-        output_separator,
-        output_width,
-        fill_rows,
-        json_output,
-        table_name,
-        table_name_set,
+        paths: matches
+            .get_many::<String>("file")
+            .map(|values| values.map(ToString::to_string).collect())
+            .unwrap_or_default(),
+        table_mode: matches.get_flag("table"),
+        keep_empty_lines: matches.get_flag("keep-empty-lines"),
+        separators: matches
+            .get_one::<String>("separator")
+            .map(ToString::to_string),
+        output_separator: matches
+            .get_one::<String>("output-separator")
+            .map_or_else(|| "  ".to_string(), ToString::to_string),
+        output_width: matches
+            .get_one::<usize>("output-width")
+            .copied()
+            .unwrap_or(DEFAULT_OUTPUT_WIDTH),
+        fill_rows: matches.get_flag("fillrows"),
+        json_output: matches.get_flag("json"),
+        table_name: matches
+            .get_one::<String>("table-name")
+            .map_or_else(|| "table".to_string(), ToString::to_string),
+        table_name_set: matches.contains_id("table-name"),
         table_columns,
-        table_noheadings,
+        table_noheadings: matches.get_flag("table-noheadings"),
         table_hide,
     })
+}
+
+fn build_cli_command() -> Command {
+    Command::new("column-rs")
+        .disable_help_flag(true)
+        .disable_version_flag(true)
+        .arg(
+            Arg::new("table")
+                .short('t')
+                .long("table")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("table-name")
+                .short('n')
+                .long("table-name")
+                .value_name("name"),
+        )
+        .arg(
+            Arg::new("table-columns")
+                .short('N')
+                .long("table-columns")
+                .value_name("names"),
+        )
+        .arg(
+            Arg::new("table-hide")
+                .short('H')
+                .long("table-hide")
+                .value_name("columns")
+                .action(ArgAction::Append),
+        )
+        .arg(
+            Arg::new("table-noheadings")
+                .short('d')
+                .long("table-noheadings")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("json")
+                .short('J')
+                .long("json")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("output-width")
+                .short('c')
+                .long("output-width")
+                .value_name("width")
+                .value_parser(clap::value_parser!(usize)),
+        )
+        .arg(
+            Arg::new("fillrows")
+                .short('x')
+                .long("fillrows")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("keep-empty-lines")
+                .short('L')
+                .long("keep-empty-lines")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("output-separator")
+                .short('o')
+                .long("output-separator")
+                .value_name("string"),
+        )
+        .arg(
+            Arg::new("separator")
+                .short('s')
+                .long("separator")
+                .value_name("string"),
+        )
+        .arg(
+            Arg::new("help")
+                .short('h')
+                .long("help")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("version")
+                .short('V')
+                .long("version")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(Arg::new("file").value_name("file").num_args(0..))
+}
+
+fn parse_non_empty_csv(value: &str, arg_name: &str) -> Result<Vec<String>, String> {
+    let items = value
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        return Err(format!("invalid argument for {arg_name}"));
+    }
+    Ok(items)
+}
+
+fn map_clap_error(err: clap::Error) -> String {
+    if err.kind() == ErrorKind::UnknownArgument {
+        let rendered = err.to_string();
+        if let Some(arg) = rendered.split('\'').nth(1) {
+            return format!("unsupported option: {arg}");
+        }
+    }
+
+    err.to_string().trim().to_string()
 }
 
 /// Resolves `-H/--table-hide` specs into 0-based column indexes.
