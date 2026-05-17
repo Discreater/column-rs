@@ -1,3 +1,5 @@
+use unicode_width::UnicodeWidthStr;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Row {
     Cells(Vec<String>),
@@ -24,6 +26,10 @@ pub struct ListFormatOptions {
 }
 
 pub const DEFAULT_OUTPUT_WIDTH: usize = 80;
+
+fn display_width(value: &str) -> usize {
+    UnicodeWidthStr::width(value)
+}
 
 impl Default for ListFormatOptions {
     fn default() -> Self {
@@ -106,7 +112,7 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
     for row in rows {
         if let Row::Cells(cols) = row {
             for (idx, cell) in cols.iter().enumerate() {
-                widths[idx] = widths[idx].max(cell.chars().count());
+                widths[idx] = widths[idx].max(display_width(cell));
             }
         }
     }
@@ -118,7 +124,7 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
                 for (idx, cell) in cols.iter().enumerate() {
                     output.push_str(cell);
                     if idx < cols.len() - 1 {
-                        let pad = widths[idx].saturating_sub(cell.chars().count());
+                        let pad = widths[idx].saturating_sub(display_width(cell));
                         for _ in 0..pad {
                             output.push(' ');
                         }
@@ -147,19 +153,19 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
 struct ListLayoutMetrics {
     rows: usize,
     widths: Vec<usize>,
-    char_counts: Vec<usize>,
+    entry_widths: Vec<usize>,
 }
 
 /// Computes row count and per-column widths for a list layout candidate.
 fn list_layout_widths(entries: &[String], cols: usize, fill_rows: bool) -> ListLayoutMetrics {
     let rows = entries.len().div_ceil(cols);
     let mut widths = vec![0usize; cols];
-    let mut char_counts = Vec::with_capacity(entries.len());
+    let mut entry_widths = Vec::with_capacity(entries.len());
     for entry in entries {
-        char_counts.push(entry.chars().count());
+        entry_widths.push(display_width(entry));
     }
 
-    for (idx, width) in char_counts.iter().enumerate() {
+    for (idx, width) in entry_widths.iter().enumerate() {
         let col = if fill_rows { idx % cols } else { idx / rows };
         widths[col] = widths[col].max(*width);
     }
@@ -167,7 +173,7 @@ fn list_layout_widths(entries: &[String], cols: usize, fill_rows: bool) -> ListL
     ListLayoutMetrics {
         rows,
         widths,
-        char_counts,
+        entry_widths,
     }
 }
 
@@ -178,23 +184,20 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
 
     let mut best_cols = 1usize;
     let mut best_rows = entries.len();
-    let mut best_widths = vec![entries[0].chars().count()];
-    let mut best_char_counts = entries
-        .iter()
-        .map(|v| v.chars().count())
-        .collect::<Vec<_>>();
+    let mut best_widths = vec![display_width(&entries[0])];
+    let mut best_entry_widths = entries.iter().map(|v| display_width(v)).collect::<Vec<_>>();
 
     for cols in 1..=entries.len() {
         let metrics = list_layout_widths(entries, cols, options.fill_rows);
         let line_width = metrics.widths.iter().sum::<usize>() + cols.saturating_sub(1) * 2;
-        if line_width <= options.output_width {
-            best_cols = cols;
-            best_rows = metrics.rows;
-            best_widths = metrics.widths;
-            best_char_counts = metrics.char_counts;
-        } else {
-            break;
-        }
+            if line_width <= options.output_width {
+                best_cols = cols;
+                best_rows = metrics.rows;
+                best_widths = metrics.widths;
+                best_entry_widths = metrics.entry_widths;
+            } else {
+                break;
+            }
     }
 
     let mut out = String::new();
@@ -216,7 +219,7 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
                 } else {
                     prev_col * best_rows + row
                 };
-                let prev_len = best_char_counts[prev_idx];
+                let prev_len = best_entry_widths[prev_idx];
                 let pad = best_widths[prev_col].saturating_sub(prev_len) + 2;
                 for _ in 0..pad {
                     out.push(' ');
@@ -301,6 +304,16 @@ mod tests {
     }
 
     #[test]
+    fn format_table_aligns_display_width() {
+        let rows = vec![
+            Row::Cells(vec!["你".to_string(), "1".to_string()]),
+            Row::Cells(vec!["ab".to_string(), "22".to_string()]),
+        ];
+        let out = format_table(&rows, &TableFormatOptions::default());
+        assert_eq!(out, "你  1\nab  22\n");
+    }
+
+    #[test]
     fn format_table_keeps_empty_lines_shape() {
         let rows = vec![
             Row::Cells(vec!["a".to_string(), "b".to_string()]),
@@ -364,5 +377,23 @@ mod tests {
             },
         );
         assert_eq!(out, "1  2\n3  4\n5  6\n");
+    }
+
+    #[test]
+    fn format_list_uses_display_width_for_padding() {
+        let entries = vec![
+            "你".to_string(),
+            "ab".to_string(),
+            "cd".to_string(),
+            "ef".to_string(),
+        ];
+        let out = format_list(
+            &entries,
+            &ListFormatOptions {
+                output_width: 6,
+                fill_rows: false,
+            },
+        );
+        assert_eq!(out, "你  cd\nab  ef\n");
     }
 }
