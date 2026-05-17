@@ -23,10 +23,12 @@ pub struct ListFormatOptions {
     pub fill_rows: bool,
 }
 
+pub const DEFAULT_OUTPUT_WIDTH: usize = 80;
+
 impl Default for ListFormatOptions {
     fn default() -> Self {
         Self {
-            output_width: 80,
+            output_width: DEFAULT_OUTPUT_WIDTH,
             fill_rows: false,
         }
     }
@@ -141,11 +143,13 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
     output
 }
 
-fn list_layout_widths(
-    entries: &[String],
-    cols: usize,
-    fill_rows: bool,
-) -> (usize, Vec<usize>, Vec<usize>) {
+struct ListLayoutMetrics {
+    rows: usize,
+    widths: Vec<usize>,
+    char_counts: Vec<usize>,
+}
+
+fn list_layout_widths(entries: &[String], cols: usize, fill_rows: bool) -> ListLayoutMetrics {
     let rows = entries.len().div_ceil(cols);
     let mut widths = vec![0usize; cols];
     let mut char_counts = Vec::with_capacity(entries.len());
@@ -158,7 +162,11 @@ fn list_layout_widths(
         widths[col] = widths[col].max(*width);
     }
 
-    (rows, widths, char_counts)
+    ListLayoutMetrics {
+        rows,
+        widths,
+        char_counts,
+    }
 }
 
 pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
@@ -175,13 +183,13 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
         .collect::<Vec<_>>();
 
     for cols in 1..=entries.len() {
-        let (rows, widths, char_counts) = list_layout_widths(entries, cols, options.fill_rows);
-        let line_width = widths.iter().sum::<usize>() + cols.saturating_sub(1) * 2;
+        let metrics = list_layout_widths(entries, cols, options.fill_rows);
+        let line_width = metrics.widths.iter().sum::<usize>() + cols.saturating_sub(1) * 2;
         if line_width <= options.output_width {
             best_cols = cols;
-            best_rows = rows;
-            best_widths = widths;
-            best_char_counts = char_counts;
+            best_rows = metrics.rows;
+            best_widths = metrics.widths;
+            best_char_counts = metrics.char_counts;
         } else {
             break;
         }

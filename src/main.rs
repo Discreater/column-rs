@@ -4,7 +4,8 @@ use std::io::{self, Read};
 use std::process::ExitCode;
 
 use column_rs::{
-    ListFormatOptions, TableFormatOptions, format_list, format_table, parse_entries, parse_rows,
+    DEFAULT_OUTPUT_WIDTH, ListFormatOptions, TableFormatOptions, format_list, format_table,
+    parse_entries, parse_rows,
 };
 
 struct CliOptions {
@@ -75,7 +76,7 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
     let mut keep_empty_lines = false;
     let mut separators = None;
     let mut output_separator = "  ".to_string();
-    let mut output_width = 80usize;
+    let mut output_width = DEFAULT_OUTPUT_WIDTH;
     let mut fill_rows = false;
     let mut paths = Vec::new();
 
