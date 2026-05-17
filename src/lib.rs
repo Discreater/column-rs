@@ -190,14 +190,14 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
     for cols in 1..=entries.len() {
         let metrics = list_layout_widths(entries, cols, options.fill_rows);
         let line_width = metrics.widths.iter().sum::<usize>() + cols.saturating_sub(1) * 2;
-            if line_width <= options.output_width {
-                best_cols = cols;
-                best_rows = metrics.rows;
-                best_widths = metrics.widths;
-                best_entry_widths = metrics.entry_widths;
-            } else {
-                break;
-            }
+        if line_width <= options.output_width {
+            best_cols = cols;
+            best_rows = metrics.rows;
+            best_widths = metrics.widths;
+            best_entry_widths = metrics.entry_widths;
+        } else {
+            break;
+        }
     }
 
     let mut out = String::new();
