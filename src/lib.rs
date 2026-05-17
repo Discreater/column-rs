@@ -17,6 +17,21 @@ impl Default for TableFormatOptions {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListFormatOptions {
+    pub output_width: usize,
+    pub fill_rows: bool,
+}
+
+impl Default for ListFormatOptions {
+    fn default() -> Self {
+        Self {
+            output_width: 80,
+            fill_rows: false,
+        }
+    }
+}
+
 pub fn parse_rows(input: &str, separators: Option<&str>, keep_empty_lines: bool) -> Vec<Row> {
     input
         .lines()
@@ -44,6 +59,32 @@ pub fn parse_rows(input: &str, separators: Option<&str>, keep_empty_lines: bool)
             }
         })
         .collect()
+}
+
+pub fn parse_entries(input: &str, separators: Option<&str>, keep_empty_lines: bool) -> Vec<String> {
+    let mut entries = Vec::new();
+    for line in input.lines() {
+        if line.is_empty() {
+            if keep_empty_lines {
+                entries.push(String::new());
+            }
+            continue;
+        }
+
+        match separators {
+            Some(seps) => {
+                for item in line.split(|c| seps.contains(c)).map(str::trim) {
+                    entries.push(item.to_string());
+                }
+            }
+            None => {
+                for item in line.split_whitespace() {
+                    entries.push(item.to_string());
+                }
+            }
+        }
+    }
+    entries
 }
 
 pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
@@ -100,9 +141,92 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
     output
 }
 
+fn list_layout_widths(
+    entries: &[String],
+    cols: usize,
+    fill_rows: bool,
+) -> (usize, Vec<usize>, Vec<usize>) {
+    let rows = entries.len().div_ceil(cols);
+    let mut widths = vec![0usize; cols];
+    let mut char_counts = Vec::with_capacity(entries.len());
+    for entry in entries {
+        char_counts.push(entry.chars().count());
+    }
+
+    for (idx, width) in char_counts.iter().enumerate() {
+        let col = if fill_rows { idx % cols } else { idx / rows };
+        widths[col] = widths[col].max(*width);
+    }
+
+    (rows, widths, char_counts)
+}
+
+pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
+    if entries.is_empty() {
+        return String::new();
+    }
+
+    let mut best_cols = 1usize;
+    let mut best_rows = entries.len();
+    let mut best_widths = vec![entries[0].chars().count()];
+    let mut best_char_counts = entries
+        .iter()
+        .map(|v| v.chars().count())
+        .collect::<Vec<_>>();
+
+    for cols in 1..=entries.len() {
+        let (rows, widths, char_counts) = list_layout_widths(entries, cols, options.fill_rows);
+        let line_width = widths.iter().sum::<usize>() + cols.saturating_sub(1) * 2;
+        if line_width <= options.output_width {
+            best_cols = cols;
+            best_rows = rows;
+            best_widths = widths;
+            best_char_counts = char_counts;
+        } else {
+            break;
+        }
+    }
+
+    let mut out = String::new();
+    for row in 0..best_rows {
+        let mut first = true;
+        for col in 0..best_cols {
+            let idx = if options.fill_rows {
+                row * best_cols + col
+            } else {
+                col * best_rows + row
+            };
+            if idx >= entries.len() {
+                continue;
+            }
+            if !first {
+                let prev_col = col - 1;
+                let prev_idx = if options.fill_rows {
+                    row * best_cols + prev_col
+                } else {
+                    prev_col * best_rows + row
+                };
+                let prev_len = best_char_counts[prev_idx];
+                let pad = best_widths[prev_col].saturating_sub(prev_len) + 2;
+                for _ in 0..pad {
+                    out.push(' ');
+                }
+            }
+            out.push_str(&entries[idx]);
+            first = false;
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Row, TableFormatOptions, format_table, parse_rows};
+    use super::{
+        ListFormatOptions, Row, TableFormatOptions, format_list, format_table, parse_entries,
+        parse_rows,
+    };
 
     #[test]
     fn parse_rows_skips_blank_lines() {
@@ -143,6 +267,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_entries_parses_whitespace_words() {
+        let entries = parse_entries("a b\nc d\n", None, false);
+        assert_eq!(entries, vec!["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn parse_entries_keeps_empty_lines() {
+        let entries = parse_entries("a\n\nb\n", None, true);
+        assert_eq!(entries, vec!["a", "", "b"]);
+    }
+
+    #[test]
     fn format_table_aligns_columns() {
         let rows = vec![
             Row::Cells(vec!["name".to_string(), "age".to_string()]),
@@ -178,5 +314,45 @@ mod tests {
             },
         );
         assert_eq!(out, "a | b\nc | d\n");
+    }
+
+    #[test]
+    fn format_list_default_fills_columns() {
+        let entries = vec![
+            "1".to_string(),
+            "2".to_string(),
+            "3".to_string(),
+            "4".to_string(),
+            "5".to_string(),
+            "6".to_string(),
+        ];
+        let out = format_list(
+            &entries,
+            &ListFormatOptions {
+                output_width: 4,
+                fill_rows: false,
+            },
+        );
+        assert_eq!(out, "1  4\n2  5\n3  6\n");
+    }
+
+    #[test]
+    fn format_list_fill_rows() {
+        let entries = vec![
+            "1".to_string(),
+            "2".to_string(),
+            "3".to_string(),
+            "4".to_string(),
+            "5".to_string(),
+            "6".to_string(),
+        ];
+        let out = format_list(
+            &entries,
+            &ListFormatOptions {
+                output_width: 4,
+                fill_rows: true,
+            },
+        );
+        assert_eq!(out, "1  2\n3  4\n5  6\n");
     }
 }

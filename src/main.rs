@@ -3,13 +3,18 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::process::ExitCode;
 
-use column_rs::{TableFormatOptions, format_table, parse_rows};
+use column_rs::{
+    ListFormatOptions, TableFormatOptions, format_list, format_table, parse_entries, parse_rows,
+};
 
 struct CliOptions {
     paths: Vec<String>,
+    table_mode: bool,
     keep_empty_lines: bool,
     separators: Option<String>,
     output_separator: String,
+    output_width: usize,
+    fill_rows: bool,
 }
 
 const HELP_TEXT: &str = "\
@@ -20,6 +25,8 @@ Columnate lists.
 
 Options:
  -t, --table                      create a table
+ -c, --output-width <width>       width of output in number of characters
+ -x, --fillrows                   fill rows before columns
  -L, --keep-empty-lines           don't ignore empty lines
  -o, --output-separator <string>  columns separator for table output (default is two spaces)
  -s, --separator <string>         possible table delimiters
@@ -64,9 +71,12 @@ fn read_input(paths: &[String]) -> Result<String, String> {
 }
 
 fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
+    let mut table_mode = false;
     let mut keep_empty_lines = false;
     let mut separators = None;
     let mut output_separator = "  ".to_string();
+    let mut output_width = 80usize;
+    let mut fill_rows = false;
     let mut paths = Vec::new();
 
     let mut idx = 0usize;
@@ -85,6 +95,29 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
             return Err(String::new());
         }
         if arg == "-t" || arg == "--table" {
+            table_mode = true;
+            idx += 1;
+            continue;
+        }
+        if arg == "-x" || arg == "--fillrows" {
+            fill_rows = true;
+            idx += 1;
+            continue;
+        }
+        if arg == "-c" || arg == "--output-width" {
+            let Some(next) = args.get(idx + 1) else {
+                return Err("missing argument for -c/--output-width".to_string());
+            };
+            output_width = next
+                .parse::<usize>()
+                .map_err(|_| format!("invalid output width: {next}"))?;
+            idx += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--output-width=") {
+            output_width = value
+                .parse::<usize>()
+                .map_err(|_| format!("invalid output width: {value}"))?;
             idx += 1;
             continue;
         }
@@ -133,9 +166,12 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
 
     Ok(CliOptions {
         paths,
+        table_mode,
         keep_empty_lines,
         separators,
         output_separator,
+        output_width,
+        fill_rows,
     })
 }
 
@@ -148,20 +184,38 @@ fn run() -> Result<(), String> {
     };
 
     let input = read_input(&options.paths)?;
-    let rows = parse_rows(
-        &input,
-        options.separators.as_deref(),
-        options.keep_empty_lines,
-    );
-    print!(
-        "{}",
-        format_table(
-            &rows,
-            &TableFormatOptions {
-                output_separator: options.output_separator,
-            }
-        )
-    );
+    if options.table_mode {
+        let rows = parse_rows(
+            &input,
+            options.separators.as_deref(),
+            options.keep_empty_lines,
+        );
+        print!(
+            "{}",
+            format_table(
+                &rows,
+                &TableFormatOptions {
+                    output_separator: options.output_separator,
+                }
+            )
+        );
+    } else {
+        let entries = parse_entries(
+            &input,
+            options.separators.as_deref(),
+            options.keep_empty_lines,
+        );
+        print!(
+            "{}",
+            format_list(
+                &entries,
+                &ListFormatOptions {
+                    output_width: options.output_width,
+                    fill_rows: options.fill_rows,
+                }
+            )
+        );
+    }
     Ok(())
 }
 
