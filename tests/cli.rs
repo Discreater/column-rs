@@ -36,11 +36,11 @@ fn unique_temp_path(name: &str) -> PathBuf {
 }
 
 #[test]
-fn formats_stdin_table() {
-    let (stdout, stderr, code) = run_column(&[], "name age\nalice 8\n");
+fn default_mode_columnates_list() {
+    let (stdout, stderr, code) = run_column(&["-c", "4"], "1\n2\n3\n4\n5\n6\n");
     assert_eq!(code, 0);
     assert_eq!(stderr, "");
-    assert_eq!(stdout, "name   age\nalice  8\n");
+    assert_eq!(stdout, "1  4\n2  5\n3  6\n");
 }
 
 #[test]
@@ -49,11 +49,58 @@ fn keeps_input_order_with_file_and_stdin() {
     fs::write(&path, "file 1\n").expect("failed to write temp file");
 
     let path_string = path.to_string_lossy().to_string();
-    let (stdout, stderr, code) = run_column(&[path_string.as_str(), "-"], "stdin 2\n");
+    let (stdout, stderr, code) = run_column(&["-t", path_string.as_str(), "-"], "stdin 2\n");
 
     fs::remove_file(&path).expect("failed to remove temp file");
 
     assert_eq!(code, 0);
     assert_eq!(stderr, "");
     assert_eq!(stdout, "file   1\nstdin  2\n");
+}
+
+#[test]
+fn supports_keep_empty_lines() {
+    let (stdout, stderr, code) = run_column(&["-t", "-L"], "a b\n\nc d\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "a  b\n   \nc  d\n");
+}
+
+#[test]
+fn supports_custom_separator() {
+    let (stdout, stderr, code) = run_column(&["-t", "-s", ":"], "a::b\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "a    b\n");
+}
+
+#[test]
+fn supports_custom_output_separator() {
+    let (stdout, stderr, code) = run_column(&["-t", "-o", " | "], "a b\nc d\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "a | b\nc | d\n");
+}
+
+#[test]
+fn supports_fill_rows_in_default_mode() {
+    let (stdout, stderr, code) = run_column(&["-x", "-c", "4"], "1\n2\n3\n4\n5\n6\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "1  2\n3  4\n5  6\n");
+}
+
+#[test]
+fn supports_explicit_table_mode() {
+    let (stdout, stderr, code) = run_column(&["-t"], "name age\nalice 8\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "name   age\nalice  8\n");
+}
+
+#[test]
+fn rejects_unsupported_option() {
+    let (_, stderr, code) = run_column(&["--json"], "");
+    assert_eq!(code, 1);
+    assert!(stderr.contains("unsupported option: --json"));
 }
