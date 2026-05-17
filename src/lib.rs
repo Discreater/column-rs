@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 pub fn parse_rows(input: &str) -> Vec<Vec<String>> {
     input
         .lines()
@@ -34,7 +32,7 @@ pub fn format_table(rows: &[Vec<String>]) -> String {
                 }
             }
         }
-        let _ = writeln!(output);
+        output.push('\n');
     }
 
     output
