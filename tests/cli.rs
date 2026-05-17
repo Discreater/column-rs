@@ -57,3 +57,34 @@ fn keeps_input_order_with_file_and_stdin() {
     assert_eq!(stderr, "");
     assert_eq!(stdout, "file   1\nstdin  2\n");
 }
+
+#[test]
+fn supports_keep_empty_lines() {
+    let (stdout, stderr, code) = run_column(&["-L"], "a b\n\nc d\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "a  b\n   \nc  d\n");
+}
+
+#[test]
+fn supports_custom_separator() {
+    let (stdout, stderr, code) = run_column(&["-s", ":"], "a::b\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "a    b\n");
+}
+
+#[test]
+fn supports_custom_output_separator() {
+    let (stdout, stderr, code) = run_column(&["-o", " | "], "a b\nc d\n");
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "a | b\nc | d\n");
+}
+
+#[test]
+fn rejects_unsupported_option() {
+    let (_, stderr, code) = run_column(&["--json"], "");
+    assert_eq!(code, 1);
+    assert!(stderr.contains("unsupported option: --json"));
+}
