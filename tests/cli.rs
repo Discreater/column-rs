@@ -37,7 +37,7 @@ fn unique_temp_path(name: &str) -> PathBuf {
 
 #[test]
 fn formats_stdin_table() {
-    let (stdout, stderr, code) = run_column(&["-t"], "name age\nalice 8\n");
+    let (stdout, stderr, code) = run_column(&[], "name age\nalice 8\n");
     assert_eq!(code, 0);
     assert_eq!(stderr, "");
     assert_eq!(stdout, "name   age\nalice  8\n");
@@ -51,7 +51,7 @@ fn keeps_input_order_with_file_and_stdin() {
     let path_string = path.to_string_lossy().to_string();
     let (stdout, stderr, code) = run_column(&[path_string.as_str(), "-"], "stdin 2\n");
 
-    let _ = fs::remove_file(&path);
+    fs::remove_file(&path).expect("failed to remove temp file");
 
     assert_eq!(code, 0);
     assert_eq!(stderr, "");

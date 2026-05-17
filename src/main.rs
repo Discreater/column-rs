@@ -46,11 +46,8 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     let mut paths = Vec::new();
     for arg in args {
-        if arg == "-t" || arg == "--table" {
-            continue;
-        }
         if arg == "-h" || arg == "--help" {
-            println!("Usage: column-rs [-t|--table] [FILE ...]");
+            println!("Usage: column-rs [FILE ...]");
             return Ok(());
         }
         paths.push(arg);
