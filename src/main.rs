@@ -281,6 +281,10 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
     })
 }
 
+/// Resolves `-H/--table-hide` specs into 0-based column indexes.
+///
+/// Each spec may be a 1-based numeric index or a column name from `--table-columns`.
+/// Returns an error when a spec is out of range or refers to an undefined column name.
 fn resolve_hidden_columns(
     max_cols: usize,
     table_columns: Option<&[String]>,
@@ -306,6 +310,7 @@ fn resolve_hidden_columns(
     Ok(hidden)
 }
 
+/// Removes cells whose indexes are present in `hidden`, mutating the row in place.
 fn hide_row_columns(row: &mut Row, hidden: &HashSet<usize>) {
     if let Row::Cells(cells) = row {
         let mut kept = Vec::with_capacity(cells.len());

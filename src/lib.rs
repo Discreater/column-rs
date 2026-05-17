@@ -151,6 +151,11 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
     output
 }
 
+/// Formats parsed table rows as pretty JSON.
+///
+/// `table_name` is used as the root object key and `column_names` defines emitted JSON keys
+/// for each row object. Returns an error if `column_names` is empty or if any row has more
+/// cells than available column names.
 pub fn format_table_json(
     rows: &[Row],
     table_name: &str,
