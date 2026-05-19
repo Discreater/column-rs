@@ -1,0 +1,97 @@
+name: Nightly Release
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package Linux binary
+        if: runner.os == 'Linux'
+        id: package_linux
+        shell: bash
+        run: |
+          binary_name="column-rs"
+          asset_name="column-rs-nightly-${{ matrix.target }}.tar.gz"
+          cp "target/${{ matrix.target }}/release/${binary_name}" "${binary_name}"
+          tar -czf "${asset_name}" "${binary_name}"
+          echo "asset_name=${asset_name}" >> "${GITHUB_OUTPUT}"
+
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        id: package_windows
+        shell: pwsh
+        run: |
+          $binaryName = "column-rs.exe"
+          $assetName = "column-rs-nightly-${{ matrix.target }}.zip"
+          Copy-Item "target/${{ matrix.target }}/release/$binaryName" $binaryName
+          Compress-Archive -Path $binaryName -DestinationPath $assetName -Force
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "asset_name=$assetName"
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-${{ matrix.target }}
+          path: ${{ steps.package_linux.outputs.asset_name || steps.package_windows.outputs.asset_name }}
+          if-no-files-found: error
+
+  release:
+    name: Publish nightly release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish or update nightly release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: nightly
+          name: Nightly
+          commit: ${{ github.sha }}
+          prerelease: true
+          makeLatest: false
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
+          artifacts: dist/*
+          body: |
+            Automated nightly build for commit ${{ github.sha }}.
