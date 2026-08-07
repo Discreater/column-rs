@@ -25,6 +25,7 @@ struct CliOptions {
     table_columns: Option<Vec<String>>,
     table_noheadings: bool,
     table_hide: Vec<String>,
+    cjk: bool,
 }
 
 const HELP_TEXT: &str = "\
@@ -45,6 +46,7 @@ Options:
  -L, --keep-empty-lines           don't ignore empty lines
  -o, --output-separator <string>  columns separator for table output (default is two spaces)
  -s, --separator <string>         possible table delimiters
+     --cjk                        treat ambiguous-width characters as double-width (for CJK terminals)
  -h, --help                       display this help
  -V, --version                    display version";
 
@@ -149,6 +151,7 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
         table_columns,
         table_noheadings: matches.get_flag("table-noheadings"),
         table_hide,
+        cjk: matches.get_flag("cjk"),
     })
 }
 
@@ -225,6 +228,11 @@ fn build_cli_command() -> Command {
                 .value_name("string"),
         )
         .arg(
+            Arg::new("cjk")
+                .long("cjk")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
             Arg::new("help")
                 .short('h')
                 .long("help")
@@ -274,6 +282,7 @@ fn find_unknown_option(args: &[String]) -> Option<String> {
         "--table-noheadings",
         "-L",
         "--keep-empty-lines",
+        "--cjk",
         "-h",
         "--help",
         "-V",
@@ -444,6 +453,7 @@ fn run() -> Result<(), String> {
                     &rows,
                     &TableFormatOptions {
                         output_separator: options.output_separator,
+                        cjk: options.cjk,
                     }
                 )
             );
@@ -461,6 +471,7 @@ fn run() -> Result<(), String> {
                 &ListFormatOptions {
                     output_width: options.output_width,
                     fill_rows: options.fill_rows,
+                    cjk: options.cjk,
                 }
             )
         );
