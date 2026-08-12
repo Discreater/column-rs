@@ -211,3 +211,40 @@ fn supports_json_custom_table_name() {
         })
     );
 }
+
+#[test]
+fn cjk_flag_aligns_box_drawing_chars() {
+    // Box-drawing chars ├ and ─ are "Ambiguous" East Asian Width. Without --cjk
+    // unicode-width counts them as 1 column each; with --cjk they are 2 columns.
+    // Verify that --cjk produces correct padding so all rows align.
+    let input = "name  val\n├─abc  1\nxy  2\n";
+    let (stdout, stderr, code) = run_column(&["-t", "--cjk"], input);
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    // ├─abc CJK width = 2+2+3 = 7; name = 4; xy = 2. Max col0 = 7.
+    assert_eq!(stdout, "name     val\n├─abc  1\nxy       2\n");
+}
+
+#[test]
+fn cjk_flag_issue_7_input_alignment() {
+    // Regression test for issue #7: rows with box-drawing tree prefixes (├─, └─)
+    // must align with plain rows on CJK terminals.
+    let input = concat!(
+        "Name    MAJ:MIN SIZE    Type    Style/MountPoints\n",
+        "\\\\.\\PhysicalDrive1      1       953.87G disk    GPT\n",
+        "├─\\\\?\\Volume{1a72ffd0-8c87-4c07-8f8a-315f83c23540}\\     1:1     1.00G   partition\n",
+        "├─Offset(1074790400)    1:2     8.00G   partition\n",
+        "└─Offset(9664724992)    1:3     944.87G partition\n",
+    );
+    let (stdout, stderr, code) = run_column(&["-t", "--cjk"], input);
+    assert_eq!(code, 0);
+    assert_eq!(stderr, "");
+    let expected = concat!(
+        "Name                                                   MAJ:MIN  SIZE     Type       Style/MountPoints\n",
+        "\\\\.\\PhysicalDrive1                                     1        953.87G  disk       GPT\n",
+        "├─\\\\?\\Volume{1a72ffd0-8c87-4c07-8f8a-315f83c23540}\\  1:1      1.00G    partition\n",
+        "├─Offset(1074790400)                                 1:2      8.00G    partition\n",
+        "└─Offset(9664724992)                                 1:3      944.87G  partition\n",
+    );
+    assert_eq!(stdout, expected);
+}
