@@ -10,12 +10,16 @@ pub enum Row {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TableFormatOptions {
     pub output_separator: String,
+    /// When true, treat Unicode ambiguous-width characters (e.g. box-drawing
+    /// chars like ├─└) as double-width, matching CJK terminal rendering.
+    pub cjk: bool,
 }
 
 impl Default for TableFormatOptions {
     fn default() -> Self {
         Self {
             output_separator: "  ".to_string(),
+            cjk: false,
         }
     }
 }
@@ -24,13 +28,22 @@ impl Default for TableFormatOptions {
 pub struct ListFormatOptions {
     pub output_width: usize,
     pub fill_rows: bool,
+    /// When true, treat Unicode ambiguous-width characters as double-width.
+    pub cjk: bool,
 }
 
 pub const DEFAULT_OUTPUT_WIDTH: usize = 80;
 
 /// Computes terminal display width used by layout alignment decisions.
-fn display_width(value: &str) -> usize {
-    UnicodeWidthStr::width(value)
+///
+/// When `cjk` is true, ambiguous-width characters (East Asian Width "A") are
+/// treated as double-width, matching the rendering on CJK terminals.
+fn display_width(value: &str, cjk: bool) -> usize {
+    if cjk {
+        UnicodeWidthStr::width_cjk(value)
+    } else {
+        UnicodeWidthStr::width(value)
+    }
 }
 
 impl Default for ListFormatOptions {
@@ -38,6 +51,7 @@ impl Default for ListFormatOptions {
         Self {
             output_width: DEFAULT_OUTPUT_WIDTH,
             fill_rows: false,
+            cjk: false,
         }
     }
 }
@@ -114,7 +128,7 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
     for row in rows {
         if let Row::Cells(cols) = row {
             for (idx, cell) in cols.iter().enumerate() {
-                widths[idx] = widths[idx].max(display_width(cell));
+                widths[idx] = widths[idx].max(display_width(cell, options.cjk));
             }
         }
     }
@@ -126,7 +140,7 @@ pub fn format_table(rows: &[Row], options: &TableFormatOptions) -> String {
                 for (idx, cell) in cols.iter().enumerate() {
                     output.push_str(cell);
                     if idx < cols.len() - 1 {
-                        let pad = widths[idx].saturating_sub(display_width(cell));
+                        let pad = widths[idx].saturating_sub(display_width(cell, options.cjk));
                         for _ in 0..pad {
                             output.push(' ');
                         }
@@ -207,12 +221,12 @@ struct ListLayoutMetrics {
 }
 
 /// Computes row count and per-column widths for a list layout candidate.
-fn list_layout_widths(entries: &[String], cols: usize, fill_rows: bool) -> ListLayoutMetrics {
+fn list_layout_widths(entries: &[String], cols: usize, fill_rows: bool, cjk: bool) -> ListLayoutMetrics {
     let rows = entries.len().div_ceil(cols);
     let mut widths = vec![0usize; cols];
     let mut entry_display_widths = Vec::with_capacity(entries.len());
     for entry in entries {
-        entry_display_widths.push(display_width(entry));
+        entry_display_widths.push(display_width(entry, cjk));
     }
 
     for (idx, width) in entry_display_widths.iter().enumerate() {
@@ -234,12 +248,12 @@ pub fn format_list(entries: &[String], options: &ListFormatOptions) -> String {
 
     let mut best_cols = 1usize;
     let mut best_rows = entries.len();
-    let mut best_widths = vec![display_width(&entries[0])];
+    let mut best_widths = vec![display_width(&entries[0], options.cjk)];
     let mut best_entry_display_widths =
-        entries.iter().map(|v| display_width(v)).collect::<Vec<_>>();
+        entries.iter().map(|v| display_width(v, options.cjk)).collect::<Vec<_>>();
 
     for cols in 1..=entries.len() {
-        let metrics = list_layout_widths(entries, cols, options.fill_rows);
+        let metrics = list_layout_widths(entries, cols, options.fill_rows, options.cjk);
         let line_width = metrics.widths.iter().sum::<usize>() + cols.saturating_sub(1) * 2;
         if line_width <= options.output_width {
             best_cols = cols;
@@ -387,6 +401,7 @@ mod tests {
             &rows,
             &TableFormatOptions {
                 output_separator: " | ".to_string(),
+                cjk: false,
             },
         );
         assert_eq!(out, "a | b\nc | d\n");
@@ -439,6 +454,7 @@ mod tests {
             &ListFormatOptions {
                 output_width: 4,
                 fill_rows: false,
+                cjk: false,
             },
         );
         assert_eq!(out, "1  4\n2  5\n3  6\n");
@@ -459,9 +475,32 @@ mod tests {
             &ListFormatOptions {
                 output_width: 4,
                 fill_rows: true,
+                cjk: false,
             },
         );
         assert_eq!(out, "1  2\n3  4\n5  6\n");
+    }
+
+    #[test]
+    fn format_table_cjk_aligns_ambiguous_width_chars() {
+        // Box-drawing chars ├ and ─ are "Ambiguous" width — on CJK terminals they
+        // render as double-width (2 columns each). With --cjk the computed widths
+        // must account for that so all rows align correctly.
+        let rows = vec![
+            Row::Cells(vec!["name".to_string(), "val".to_string()]),
+            Row::Cells(vec!["├─abc".to_string(), "1".to_string()]),
+            Row::Cells(vec!["xy".to_string(), "2".to_string()]),
+        ];
+        let out = format_table(
+            &rows,
+            &TableFormatOptions {
+                output_separator: "  ".to_string(),
+                cjk: true,
+            },
+        );
+        // ├─abc has CJK width 2+2+3=7; xy has CJK width 2; name has width 4.
+        // Max col0 width = 7. Padding for "name"(4): 3 spaces. For "xy"(2): 5 spaces.
+        assert_eq!(out, "name     val\n├─abc  1\nxy       2\n");
     }
 
     #[test]
@@ -477,6 +516,7 @@ mod tests {
             &ListFormatOptions {
                 output_width: 6,
                 fill_rows: false,
+                cjk: false,
             },
         );
         assert_eq!(out, "你  cd\nab  ef\n");
